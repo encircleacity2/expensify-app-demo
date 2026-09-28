@@ -1,3 +1,4 @@
+import {SIDE_EFFECT_REQUEST_COMMANDS} from '@libs/API/types';
 import DateUtils from '@libs/DateUtils';
 import {getPersonalDetailsOnyxDataForOptimisticUsers} from '@libs/PersonalDetailsUtils';
 
@@ -1395,6 +1396,56 @@ describe('actions/PolicyMember', () => {
             // Then it should show the plural member added and updated success message
             expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersAddedAndUpdated');
             expect(importFinalModal.promptKeyParams).toStrictEqual({added: 2, updated: 2});
+        });
+
+        describe('approval limit', () => {
+            function getImportedEmployees(): unknown {
+                const body = TestHelper.getFetchMockCalls(SIDE_EFFECT_REQUEST_COMMANDS.IMPORT_MEMBERS_SPREADSHEET).at(-1)?.[1]?.body;
+                const employees = body instanceof FormData ? body.get('employees') : null;
+                return typeof employees === 'string' ? JSON.parse(employees) : undefined;
+            }
+
+            it('should send the imported approval limit to the backend in cents', async () => {
+                // Given a Control workspace, where approval limits are available
+                const policy = {...createRandomPolicy(1), type: CONST.POLICY.TYPE.CORPORATE};
+
+                // When importing a member whose spreadsheet approval limit is written in dollars
+                await Member.importPolicyMembers(policy, [{email: 'user@gmail.com', role: CONST.POLICY.ROLE.USER, approvalLimit: '200.00'}]);
+                await waitForBatchedUpdates();
+
+                // Then the limit is sent in cents, since the backend stores cents and the Workflows page divides by 100 to display it
+                expect(getImportedEmployees()).toEqual([expect.objectContaining({approvalLimit: '20000'})]);
+            });
+
+            it('should not count a member as updated when the imported approval limit matches the stored one', async () => {
+                // Given a Control workspace with an approver whose stored limit is 20000 cents ($200.00)
+                const userEmail = 'user@gmail.com';
+                const policy = {
+                    ...createRandomPolicy(1),
+                    type: CONST.POLICY.TYPE.CORPORATE,
+                    employeeList: {
+                        [userEmail]: {role: CONST.POLICY.ROLE.USER, approvalLimit: 20000},
+                    },
+                };
+
+                // When re-importing the same member with the same role and the same $200.00 limit
+                const importFinalModal = await Member.importPolicyMembers(policy, [{email: userEmail, role: CONST.POLICY.ROLE.USER, approvalLimit: '200.00'}]);
+
+                // Then nothing changed, so the summary must not report the member as updated
+                expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersNoneAddedOrUpdated');
+            });
+
+            it('should send an empty approval limit unchanged', async () => {
+                // Given a Control workspace
+                const policy = {...createRandomPolicy(1), type: CONST.POLICY.TYPE.CORPORATE};
+
+                // When importing a member whose approval limit cell is empty
+                await Member.importPolicyMembers(policy, [{email: 'user@gmail.com', role: CONST.POLICY.ROLE.USER, approvalLimit: ''}]);
+                await waitForBatchedUpdates();
+
+                // Then the empty value is passed through as-is, so converting to cents does not change how empty cells are handled
+                expect(getImportedEmployees()).toEqual([expect.objectContaining({approvalLimit: ''})]);
+            });
         });
     });
 

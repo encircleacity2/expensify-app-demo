@@ -12,6 +12,7 @@ import type {
 } from '@libs/API/parameters';
 import {READ_COMMANDS, SIDE_EFFECT_REQUEST_COMMANDS, WRITE_COMMANDS} from '@libs/API/types';
 import * as ApiUtils from '@libs/ApiUtils';
+import {convertToBackendAmount} from '@libs/CurrencyUtils';
 import DateUtils from '@libs/DateUtils';
 import * as ErrorUtils from '@libs/ErrorUtils';
 import fileDownload from '@libs/fileDownload';
@@ -1031,11 +1032,24 @@ type PolicyMember = {
     overLimitForwardsTo?: string;
 };
 
-async function importPolicyMembers(policy: OnyxEntry<Policy>, members: PolicyMember[], shouldShowMemberRolePermissionWarning = false): Promise<ImportFinalModal> {
+/**
+ * Spreadsheet approval limits are written in the currency's major unit (e.g. dollars), but the backend stores them in cents.
+ * Empty and non-numeric values are passed through unchanged so the backend validation still applies.
+ */
+function getApprovalLimitInCents(approvalLimit: string | undefined): string | undefined {
+    const trimmedApprovalLimit = approvalLimit?.trim();
+    if (!trimmedApprovalLimit || Number.isNaN(Number(trimmedApprovalLimit))) {
+        return approvalLimit;
+    }
+    return String(convertToBackendAmount(Number(trimmedApprovalLimit)));
+}
+
+async function importPolicyMembers(policy: OnyxEntry<Policy>, importedMembers: PolicyMember[], shouldShowMemberRolePermissionWarning = false): Promise<ImportFinalModal> {
     if (!policy?.id) {
         Log.warn('importPolicyMembers called without a valid policy');
         return getImportFailedFinalModal();
     }
+    const members = importedMembers.map((member) => ({...member, approvalLimit: getApprovalLimitInCents(member.approvalLimit)}));
     const {added, updated} = members.reduce(
         (acc, curr) => {
             const employee = policy?.employeeList?.[curr.email];
