@@ -1,3 +1,4 @@
+import {SIDE_EFFECT_REQUEST_COMMANDS} from '@libs/API/types';
 import DateUtils from '@libs/DateUtils';
 import {getPersonalDetailsOnyxDataForOptimisticUsers} from '@libs/PersonalDetailsUtils';
 
@@ -1395,6 +1396,40 @@ describe('actions/PolicyMember', () => {
             // Then it should show the plural member added and updated success message
             expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersAddedAndUpdated');
             expect(importFinalModal.promptKeyParams).toStrictEqual({added: 2, updated: 2});
+        });
+
+        it('should send the imported approval limit to the backend in cents', async () => {
+            // Given a Control workspace
+            const policy = createRandomPolicy(1, CONST.POLICY.TYPE.CORPORATE);
+
+            // When importing a member whose spreadsheet approval limit is written in dollars
+            await Member.importPolicyMembers(policy, [{email: 'user@gmail.com', role: CONST.POLICY.ROLE.USER, approvalLimit: '200.00'}]);
+            await waitForBatchedUpdates();
+
+            // Then the limit is sent in cents, because the backend stores approval limits in cents like the manual approval limit page does
+            const body = TestHelper.getFetchMockCalls(SIDE_EFFECT_REQUEST_COMMANDS.IMPORT_MEMBERS_SPREADSHEET).at(-1)?.[1]?.body;
+            const employees = body instanceof FormData ? body.get('employees') : null;
+            expect(employees).toContain('"approvalLimit":20000');
+        });
+
+        it('should not count a member as updated when the imported approval limit matches the stored limit', async () => {
+            // Given a workspace member whose approval limit is stored as 20000 cents ($200.00)
+            const userEmail = 'user@gmail.com';
+            const policy = {
+                ...createRandomPolicy(1, CONST.POLICY.TYPE.CORPORATE),
+                employeeList: {
+                    [userEmail]: {
+                        role: CONST.POLICY.ROLE.USER,
+                        approvalLimit: 20000,
+                    },
+                },
+            };
+
+            // When re-importing the same member with the same limit written in dollars
+            const importFinalModal = await Member.importPolicyMembers(policy, [{email: userEmail, role: CONST.POLICY.ROLE.USER, approvalLimit: '200.00'}]);
+
+            // Then nothing is reported as updated, since $200.00 and 20000 cents are the same limit
+            expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersNoneAddedOrUpdated');
         });
     });
 

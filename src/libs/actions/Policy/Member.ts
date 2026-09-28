@@ -12,6 +12,7 @@ import type {
 } from '@libs/API/parameters';
 import {READ_COMMANDS, SIDE_EFFECT_REQUEST_COMMANDS, WRITE_COMMANDS} from '@libs/API/types';
 import * as ApiUtils from '@libs/ApiUtils';
+import {convertToBackendAmount} from '@libs/CurrencyUtils';
 import DateUtils from '@libs/DateUtils';
 import * as ErrorUtils from '@libs/ErrorUtils';
 import fileDownload from '@libs/fileDownload';
@@ -1031,6 +1032,15 @@ type PolicyMember = {
     overLimitForwardsTo?: string;
 };
 
+/**
+ * Spreadsheet approval limits are written in dollars, but the backend stores them in cents.
+ * Empty or non-numeric values are passed through unchanged.
+ */
+function getImportedApprovalLimit(approvalLimit: string): number | string {
+    const amount = Number.parseFloat(approvalLimit);
+    return Number.isNaN(amount) ? approvalLimit : convertToBackendAmount(amount);
+}
+
 async function importPolicyMembers(policy: OnyxEntry<Policy>, members: PolicyMember[], shouldShowMemberRolePermissionWarning = false): Promise<ImportFinalModal> {
     if (!policy?.id) {
         Log.warn('importPolicyMembers called without a valid policy');
@@ -1048,7 +1058,7 @@ async function importPolicyMembers(policy: OnyxEntry<Policy>, members: PolicyMem
                     (curr.forwardsTo ?? '') !== (employee.forwardsTo ?? '') ||
                     (curr.customField1 !== undefined && curr.customField1 !== (existingCustomField1 ?? '')) ||
                     (curr.customField2 !== undefined && curr.customField2 !== (existingCustomField2 ?? '')) ||
-                    (curr.approvalLimit !== undefined && curr.approvalLimit !== String(employee.approvalLimit ?? '')) ||
+                    (curr.approvalLimit !== undefined && String(getImportedApprovalLimit(curr.approvalLimit)) !== String(employee.approvalLimit ?? '')) ||
                     (curr.overLimitForwardsTo !== undefined && curr.overLimitForwardsTo !== (employee.overLimitForwardsTo ?? ''))
                 ) {
                     acc.updated++;
@@ -1085,7 +1095,7 @@ async function importPolicyMembers(policy: OnyxEntry<Policy>, members: PolicyMem
                 forwardsTo: member.forwardsTo,
                 ...(member.customField1 !== undefined && {customField1: member.customField1}),
                 ...(member.customField2 !== undefined && {customField2: member.customField2}),
-                ...(member.approvalLimit !== undefined && {approvalLimit: member.approvalLimit}),
+                ...(member.approvalLimit !== undefined && {approvalLimit: getImportedApprovalLimit(member.approvalLimit)}),
                 ...(member.overLimitForwardsTo !== undefined && {overLimitForwardsTo: member.overLimitForwardsTo}),
             })),
         ),
