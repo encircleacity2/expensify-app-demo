@@ -1,3 +1,4 @@
+import {SIDE_EFFECT_REQUEST_COMMANDS} from '@libs/API/types';
 import DateUtils from '@libs/DateUtils';
 import {getPersonalDetailsOnyxDataForOptimisticUsers} from '@libs/PersonalDetailsUtils';
 
@@ -1286,6 +1287,45 @@ describe('actions/PolicyMember', () => {
             // Then it should show the no member added/updated message
             expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersNoneAddedOrUpdated');
             expect(importFinalModal.promptKeyParams).toStrictEqual(undefined);
+        });
+
+        it('should send an imported approval limit to the backend in cents', async () => {
+            // Given a Control workspace
+            const policy = {
+                ...createRandomPolicy(1),
+                type: CONST.POLICY.TYPE.CORPORATE,
+            };
+
+            // When importing a member whose spreadsheet approval limit is written in dollars
+            await Member.importPolicyMembers(policy, [{email: 'user@gmail.com', role: 'user', approvalLimit: '200.00', overLimitForwardsTo: 'approver@gmail.com'}]);
+
+            // Then the approval limit should be sent in cents, because the backend stores and the UI displays amounts in cents
+            const calls = TestHelper.getFetchMockCalls(SIDE_EFFECT_REQUEST_COMMANDS.IMPORT_MEMBERS_SPREADSHEET);
+            expect(calls).toHaveLength(1);
+            const body = calls.at(0)?.[1]?.body;
+            const employees = body instanceof FormData ? body.get('employees') : null;
+            expect(typeof employees === 'string' ? employees : '').toContain('"approvalLimit":20000');
+        });
+
+        it('should not count a member as updated when the imported approval limit matches the stored one', async () => {
+            // Given a workspace with a member whose approval limit is already $200.00 (stored as 20000 cents)
+            const userEmail = 'user@gmail.com';
+            const userRole = 'user';
+            const policy = {
+                ...createRandomPolicy(1),
+                employeeList: {
+                    [userEmail]: {
+                        role: userRole,
+                        approvalLimit: 20000,
+                    },
+                },
+            };
+
+            // When re-importing that member with the same approval limit written in dollars
+            const importFinalModal = await Member.importPolicyMembers(policy, [{email: userEmail, role: userRole, approvalLimit: '200.00'}]);
+
+            // Then nothing should be reported as updated, since the dollar value equals the stored cents value
+            expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersNoneAddedOrUpdated');
         });
 
         it('should show a "single member updated message" when a member is updated', async () => {
