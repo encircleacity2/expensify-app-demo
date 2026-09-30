@@ -5,6 +5,7 @@ import CONST from '@src/CONST';
 import OnyxUpdateManager from '@src/libs/actions/OnyxUpdateManager';
 import * as Member from '@src/libs/actions/Policy/Member';
 import * as Policy from '@src/libs/actions/Policy/Policy';
+import * as API from '@src/libs/API';
 import * as ReportActionsUtils from '@src/libs/ReportActionsUtils';
 import ONYXKEYS from '@src/ONYXKEYS';
 import type {InvitedEmailsToAccountIDs, PolicyEmployeeList, Policy as PolicyType, Report, ReportAction, ReportMetadata} from '@src/types/onyx';
@@ -1395,6 +1396,41 @@ describe('actions/PolicyMember', () => {
             // Then it should show the plural member added and updated success message
             expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersAddedAndUpdated');
             expect(importFinalModal.promptKeyParams).toStrictEqual({added: 2, updated: 2});
+        });
+
+        it('should send the imported approval limit to the backend in cents', async () => {
+            // Given a workspace and a spreadsheet row with an approval limit written in dollars, as users type it
+            const policy = createRandomPolicy(1);
+            const makeRequestSpy = jest.spyOn(API, 'makeRequestWithSideEffects').mockResolvedValue({jsonCode: CONST.JSON_CODE.SUCCESS});
+
+            // When importing the member
+            await Member.importPolicyMembers(policy, [{email: 'user@gmail.com', role: 'user', approvalLimit: '200.00'}]);
+
+            // Then the approval limit should be sent in cents, because approval limits are stored and displayed as cents
+            const parameters = makeRequestSpy.mock.calls.at(0)?.[1];
+            expect(parameters).toHaveProperty('employees', JSON.stringify([{email: 'user@gmail.com', role: 'user', approvalLimit: 20000}]));
+            makeRequestSpy.mockRestore();
+        });
+
+        it('should not count a member as updated when the imported approval limit matches the existing one', async () => {
+            // Given a member whose approval limit is already $200.00, stored in cents
+            const userEmail = 'user@gmail.com';
+            const userRole = 'user';
+            const policy = {
+                ...createRandomPolicy(1),
+                employeeList: {
+                    [userEmail]: {
+                        role: userRole,
+                        approvalLimit: 20000,
+                    },
+                },
+            };
+
+            // When importing the same member with the same approval limit written in dollars
+            const importFinalModal = await Member.importPolicyMembers(policy, [{email: userEmail, role: userRole, approvalLimit: '200.00'}]);
+
+            // Then nothing should be reported as updated, because the dollar value must be compared in cents
+            expect(importFinalModal.promptKey).toBe('spreadsheet.importMembersNoneAddedOrUpdated');
         });
     });
 
